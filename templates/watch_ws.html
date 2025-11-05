@@ -19,6 +19,8 @@
             margin-top: 20px;
         }
         img {
+            width: 640px;
+            height: auto;
             border-radius: 12px;
             box-shadow: 0 0 20px rgba(255,255,255,0.1);
         }
@@ -32,10 +34,31 @@
 <body>
     <h1>🏓 PongWorks Live Feed</h1>
     <div class="video-container">
-        <img src="/video_feed" width="640" height="480">
+        <img id="feed" alt="Live Feed">
     </div>
     <footer>
         © 2025 PongWorks | powered by Raspberry Pi
     </footer>
+
+    <script>
+        const img = document.getElementById('feed');
+        const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/video_feed`);
+
+        ws.binaryType = 'arraybuffer';
+
+        ws.onmessage = event => {
+            const bytes = new Uint8Array(event.data);
+            let binary = '';
+            for (let i = 0; i < bytes.byteLength; i++) {
+                binary += String.fromCharCode(bytes[i]);
+            }
+            const base64 = btoa(binary);
+            img.src = 'data:image/jpeg;base64,' + base64;
+        };
+
+        ws.onclose = () => {
+            console.log('Disconnected from server');
+        };
+    </script>
 </body>
 </html>

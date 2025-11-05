@@ -1,36 +1,22 @@
 import cv2
-import requests
+import websocket
 import time
 
-SERVER_URL = "https://ese.pongworks.dpdns.org/upload_frame"
-AUTH_TOKEN = "SECRET_TOKEN"
+SERVER_WS = "ws://ese.pongworks.dpdns.org/pi_stream"
 
-cap = cv2.VideoCapture(0)  # adjust camera index if needed
+cap = cv2.VideoCapture(0)
+ws = websocket.WebSocket()
+ws.connect(SERVER_WS)
 
-last_time = time.time()
-while True:
-    start_time = time.time()
-    ret, frame = cap.read()
-    if not ret:
-        continue
-
-    # Resize or annotate if desired
-    _, jpeg = cv2.imencode(".jpg", frame)
-
-    try:
-        response = requests.post(
-            SERVER_URL,
-            files={"frame": ("frame.jpg", jpeg.tobytes(), "image/jpeg")},
-            headers={"X-Auth-Token": AUTH_TOKEN},
-            timeout=2
-        )
-        if response.status_code != 200:
-            print("Upload failed:", response.status_code)
-    except Exception as e:
-        print("Error:", e)
-
-    now = time.time()
-    delta_time = now - start_time
-    last_time = now
-    if 0.1-delta_time>0:
-        time.sleep(0.1-delta_time)  # send ~10 fps
+try:
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            continue
+        frame = cv2.resize(frame, (320, 240))
+        _, jpeg = cv2.imencode(".jpg", frame)
+        ws.send(jpeg.tobytes(), opcode=websocket.ABNF.OPCODE_BINARY)
+        time.sleep(0.03)  # ~30 fps
+finally:
+    ws.close()
+    cap.release()
