@@ -10,9 +10,13 @@ sock = Sock(app)
 encoded_frame = None
 frame_queue = queue.Queue(maxsize=1)
 pi_frequency = 10
+pi_stream_password = "pongworks1110"
 
 # Keep a set of connected WebSocket clients
 clients = set()
+
+# Dictionary to store received variables
+variables: dict[str, str] = {}  # name -> value
 
 
 
@@ -28,29 +32,53 @@ def watch():
     """Render the watch page with WebSocket video feed"""
     return render_template("watch_ws.html")
 
+
 # --- WebSocket route for video feed ---
 @sock.route("/pi_stream")
 def pi_stream(ws):
-    """Receive JPEG frames from the Pi over WebSocket, drop old ones."""
-    print("[*] Pi connected")
+    """Authenticate data sender and continuously receive JPEG frames over WebSocket."""
+    print("[*] Pi attempting to connect")
+
+    # Step 1: Authenticate
+    auth_msg = ws.receive()
+    if auth_msg != pi_stream_password:
+        print("[!] Unauthorized connection attempt")
+        ws.close()
+        return
+
+    print("[+] Pi authenticated successfully")
     try:
         while True:
             data = ws.receive()
             if data is None:
                 break
-            # Drop old frame if queue is full
-            try:
-                frame_queue.put(data, block=False)
-            except queue.Full:
-                try:
-                    frame_queue.get_nowait()
-                except queue.Empty:
-                    pass
-                frame_queue.put_nowait(data)
+            
+            msg_type = data[0]
+            payload = data[1:]
 
+            match msg_type:
+                case 1:  # Image
+                    # Drop old frame if queue is full
+                    try:
+                        frame_queue.put(data, block=False)
+                    except queue.Full:
+                        try:
+                            frame_queue.get_nowait()
+                        except queue.Empty:
+                            pass
+                        frame_queue.put_nowait(data)
+                    
+                case 2:  # Variable
+                    text = payload.decode('utf-8')
+                    if ":" in text:
+                        name, value = text.split(":", 1)
+                        variables[name] = value
+                        broadcast_variable_update(name, value)
+                        continue
+                case _:
+                    print("[!] Unknown message type received")
     finally:
         print("[*] Pi disconnected")
-
 
 
 # --- WebSocket route for client monitoring ---
@@ -92,6 +120,19 @@ def broadcast_worker():
                 clients.discard(dc)
 
         time.sleep(1.0 / pi_frequency)
+
+
+def broadcast_variable_update(name, value):
+    """Send variable update to all connected clients."""
+    msg = f"VAR_UPDATE:{name}:{value}"
+    dead_clients = []
+    for ws in clients.copy():
+        try:
+            ws.send(msg)
+        except Exception:
+            dead_clients.append(ws)
+    for dc in dead_clients:
+        clients.discard(dc)
 
 
 # --- Run setup ---

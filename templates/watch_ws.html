@@ -11,21 +11,66 @@
             background-color: #121212;
             color: #fff;
             text-align: center;
+            margin: 0;
+            padding: 0;
         }
+
         h1 {
             margin-top: 20px;
         }
+
+        .main-container {
+            display: flex;
+            justify-content: center;
+            align-items: stretch; /* equal heights */
+            gap: 30px;
+            margin-top: 30px;
+            flex-wrap: wrap;
+        }
+
         .video-container {
-            margin-top: 20px;
-        }
-        img {
-            width: 640px;
-            height: auto;
-            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 12px;             /* give the container the same radius */
+            overflow: hidden;                /* hide anything that spills outside */
             box-shadow: 0 0 20px rgba(255,255,255,0.1);
+            background: #000;                /* optional – looks cleaner under video */
         }
+
+        .video-container img {
+            width: 800px;
+            height: auto;
+            display: block;                  /* removes small inline gap */
+            border-radius: 0;                /* remove radius from img itself */
+        }
+
+        .variables {
+            text-align: left;
+            background: #1f1f1f;
+            padding: 15px 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(255,255,255,0.05);
+            width: 480px;
+            overflow-y: auto;
+            overflow-x: auto;
+        }
+
+        .variables h3 {
+            margin-bottom: 10px;
+            text-align: center;
+        }
+
+        .var-item {
+            font-family: monospace;
+            white-space: nowrap;     /* keep all text in one line */
+            overflow-x: visible;     /* allow horizontal scroll */
+            text-overflow: clip;     /* don’t cut off long values */
+            padding: 2px 0;
+        }
+
         footer {
-            margin-top: 20px;
+            margin-top: 30px;
             font-size: 0.9rem;
             color: #bbb;
         }
@@ -33,32 +78,69 @@
 </head>
 <body>
     <h1>🏓 PongWorks Live Feed</h1>
-    <div class="video-container">
-        <img id="feed" alt="Live Feed">
+    <div class="main-container">
+        <div class="video-container">
+            <img id="feed" alt="Live Feed">
+        </div>
+
+        <div class="variables">
+            <h3>Live Variables</h3>
+            <div id="var-list"></div>
+        </div>
     </div>
+
     <footer>
         © 2025 PongWorks | video feed from Raspberry Pi
     </footer>
 
     <script>
         const img = document.getElementById('feed');
-        const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/video_feed`);
+        const varList = document.getElementById('var-list');
+        const vars = {};
 
+        const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/video_feed`);
         ws.binaryType = 'arraybuffer';
 
         ws.onmessage = event => {
-            const bytes = new Uint8Array(event.data);
-            let binary = '';
-            for (let i = 0; i < bytes.byteLength; i++) {
-                binary += String.fromCharCode(bytes[i]);
+            if (typeof event.data === 'string') {
+                // Handle text-based variable updates
+                if (event.data.startsWith('VAR_UPDATE:')) {
+                    const [, name, value] = event.data.split(':');
+                    vars[name] = value;
+                    updateVarList();
+                }
+                return;
             }
-            const base64 = btoa(binary);
-            img.src = 'data:image/jpeg;base64,' + base64;
+
+            // Handle binary image data
+            const bytes = new Uint8Array(event.data);
+            const msgType = bytes[0];
+            const payload = bytes.slice(1);
+
+            if (msgType === 1) {
+                const base64 = arrayBufferToBase64(payload);
+                img.src = 'data:image/jpeg;base64,' + base64;
+            }
         };
 
-        ws.onclose = () => {
-            console.log('Disconnected from server');
-        };
+        function arrayBufferToBase64(buffer) {
+            let binary = '';
+            const bytes = new Uint8Array(buffer);
+            const chunkSize = 0x8000;
+            for (let i = 0; i < bytes.length; i += chunkSize) {
+                binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+            }
+            return btoa(binary);
+        }
+
+        function updateVarList() {
+            const sorted = Object.keys(vars).sort();
+            varList.innerHTML = sorted
+                .map(k => `<div class="var-item">${k}: ${vars[k]}</div>`)
+                .join('');
+        }
+
+        ws.onclose = () => console.log('Disconnected from server');
     </script>
 </body>
 </html>
