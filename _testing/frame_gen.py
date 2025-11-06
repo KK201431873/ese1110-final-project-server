@@ -30,7 +30,7 @@ try:
             frame = cv2.resize(frame, (320, 240))
             _, jpeg = cv2.imencode(".jpg", frame)
             try:
-                ws.send(jpeg.tobytes(), opcode=websocket.ABNF.OPCODE_BINARY)
+                ws.send(b"\x01" +jpeg.tobytes(), opcode=websocket.ABNF.OPCODE_BINARY)
             except Exception as e:
                 print("Failed to send frame.")
                 connect_ws()
