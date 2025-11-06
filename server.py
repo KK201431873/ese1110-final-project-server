@@ -3,6 +3,9 @@ from flask_sock import Sock
 import threading
 import time
 import queue
+import os
+import atexit
+import psutil
 
 app = Flask(__name__)
 sock = Sock(app)
@@ -135,15 +138,55 @@ def broadcast_variable_update(name, value):
         clients.discard(dc)
 
 
-# --- Run setup ---
+# --- Graceful shutdown handler ---
+def cleanup_on_exit():
+    print("\n[!] Shutting down cleanly...")
+    for ws in list(clients):
+        try:
+            ws.close()
+        except Exception:
+            pass
+    clients.clear()
+
+    # Close any remaining threads
+    os._exit(0)
+
+
+atexit.register(cleanup_on_exit)
+
+
+# --- NEW: Ensure old instance isn’t already running ---
+def free_port_if_in_use(port=5000):
+    """Check if port is in use; if so, kill the process occupying it."""
+    for conn in psutil.net_connections():
+        if conn.laddr and conn.laddr.port == port and conn.status == psutil.CONN_LISTEN:
+            pid = conn.pid
+            if pid and pid != os.getpid():
+                try:
+                    print(f"[!] Port {port} already in use by PID {pid}. Killing it...")
+                    p = psutil.Process(pid)
+                    p.terminate()
+                    p.wait(timeout=3)
+                    print("[+] Old instance terminated.")
+                except Exception as e:
+                    print(f"[!] Failed to terminate PID {pid}: {e}")
+            break
+
+
 if __name__ == "__main__":
     from flask_cors import CORS
-    from flask_sock import Sock
-    import atexit
 
     CORS(app)
 
-    threading.Thread(target=broadcast_worker, daemon=True).start()
+    # Kill any previous server still listening on port 5000
+    free_port_if_in_use(5000)
 
+    threading.Thread(target=broadcast_worker, daemon=True).start()
     print("Starting WebSocket video server on port 5000...")
-    app.run(host="0.0.0.0", port=5000, threaded=True)
+
+    app.run(
+        host="0.0.0.0",
+        port=5000,
+        threaded=True,
+        use_reloader=False
+    )
