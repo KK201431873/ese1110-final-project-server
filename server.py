@@ -12,6 +12,7 @@ sock = Sock(app)
 
 encoded_frame = None
 frame_queue = queue.Queue(maxsize=1)
+minimap_queue = queue.Queue(maxsize=1)
 pi_frequency = 10
 pi_stream_password = "pongworks1110"
 
@@ -78,6 +79,18 @@ def pi_stream(ws):
                         variables[name] = value
                         broadcast_variable_update(name, value)
                         continue
+
+                case 3:  # Minimap
+                    # Drop old frame if queue is full
+                    try:
+                        minimap_queue.put(data, block=False)
+                    except queue.Full:
+                        try:
+                            minimap_queue.get_nowait()
+                        except queue.Empty:
+                            pass
+                        minimap_queue.put_nowait(data)
+
                 case _:
                     print("[!] Unknown message type received")
     finally:
@@ -109,6 +122,7 @@ def broadcast_worker():
         try:
             # Always take the newest frame from the queue
             encoded_frame = frame_queue.get(timeout=1)
+            encoded_minimap = minimap_queue.get(timeout=1)
         except queue.Empty:
             continue
 
@@ -117,6 +131,7 @@ def broadcast_worker():
             for ws in clients.copy():
                 try:
                     ws.send(encoded_frame)
+                    ws.send(encoded_minimap)
                 except Exception:
                     dead_clients.append(ws)
             for dc in dead_clients:

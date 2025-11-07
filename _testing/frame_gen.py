@@ -31,6 +31,7 @@ try:
             _, jpeg = cv2.imencode(".jpg", frame)
             try:
                 ws.send(b"\x01" +jpeg.tobytes(), opcode=websocket.ABNF.OPCODE_BINARY)
+                ws.send(b"\x03" +jpeg.tobytes(), opcode=websocket.ABNF.OPCODE_BINARY)
             except Exception as e:
                 print("Failed to send frame.")
                 connect_ws()
