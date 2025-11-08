@@ -84,9 +84,13 @@
             object-fit: cover;               /* crop vertically instead of stretching */
             border-radius: 8px;
             display: block;
-            box-shadow: 0 0 8px rgba(255,255,255,0.05);
         }
 
+        footer {
+            margin-top: 30px;
+            font-size: 0.9rem;
+            color: #bbb;
+        }
 
         /* Responsive fallback */
         @media (max-width: 900px) {
@@ -123,7 +127,7 @@
     </div>
 
     <footer>
-        © 2025 PongWorks | video feed from Raspberry Pi
+        © 2025 PongWorks | powered by Raspberry Pi
     </footer>
 
     <script>
@@ -134,7 +138,14 @@
         const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/video_feed`);
         ws.binaryType = 'arraybuffer';
 
-        ws.onmessage = event => {
+        ws.onmessage = (event) => {
+            if (event.data === "SERVER_FULL") {
+                alert("Sorry, the server is full. Please try again later.");
+                ws.close();
+                window.location.replace("/full");  // Redirect to a Flask page
+                return;
+            }
+
             if (typeof event.data === 'string') {
                 if (event.data.startsWith('VAR_UPDATE:')) {
                     const [, name, value] = event.data.split(':');
@@ -177,7 +188,10 @@
                 .join('');
         }
 
-        ws.onclose = () => console.log('Disconnected from server');
+        ws.onclose = () => {
+            console.log("Disconnected, retrying soon...");
+            setTimeout(() => location.reload(), 1000);
+        };
     </script>
 </body>
 </html>

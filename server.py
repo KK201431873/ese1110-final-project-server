@@ -13,8 +13,14 @@ sock = Sock(app)
 encoded_frame = None
 frame_queue = queue.Queue(maxsize=1)
 minimap_queue = queue.Queue(maxsize=1)
-pi_frequency = 10
+
+# Pi connection config
+pi_camera_frequency = 10
+pi_minimap_frequency = 30
 pi_stream_password = "pongworks1110"
+
+# Client connection config
+MAX_CLIENTS = 10
 
 # Keep a set of connected WebSocket clients
 clients = set()
@@ -34,7 +40,14 @@ def index():
 @app.route("/watch")
 def watch():
     """Render the watch page with WebSocket video feed"""
+    if len(clients) >= MAX_CLIENTS:
+        return redirect("/full")
     return render_template("watch_ws.html")
+
+
+@app.route("/full")
+def full_page():
+    return render_template("server_full.html")
 
 
 # --- WebSocket route for video feed ---
@@ -100,29 +113,38 @@ def pi_stream(ws):
 # --- WebSocket route for client monitoring ---
 @sock.route("/video_feed")
 def video_feed(ws):
-    """Keep track of connected clients using a set."""
+    """Keep track of connected clients using a set, up to MAX_CLIENTS."""
+    if len(clients) >= MAX_CLIENTS:
+        try:
+            ws.send("SERVER_FULL")
+            time.sleep(0.1)
+            ws.close()
+        except Exception:
+            pass
+        print("[!] Connection refused: server full")
+        return
+    
     clients.add(ws)
     print(f"[+] Client connected ({len(clients)} total)")
     try:
         while True:
             data = ws.receive()
-            # When data is none, it means client has disconnected
             if data is None:
                 break
+    except Exception:
+        pass
     finally:
         clients.discard(ws)
         print(f"[-] Client disconnected ({len(clients)} total)")
 
 
 # --- Broadcast to WebSocket clients ---
-def broadcast_worker():
-    """Send latest frame to all connected clients."""
+def broadcast_camera_worker():
+    """Send latest camera frame to all connected clients."""
     global encoded_frame
     while True:
         try:
-            # Always take the newest frame from the queue
             encoded_frame = frame_queue.get(timeout=1)
-            encoded_minimap = minimap_queue.get(timeout=1)
         except queue.Empty:
             continue
 
@@ -131,13 +153,34 @@ def broadcast_worker():
             for ws in clients.copy():
                 try:
                     ws.send(encoded_frame)
+                except Exception:
+                    dead_clients.append(ws)
+            for dc in dead_clients:
+                clients.discard(dc)
+
+        time.sleep(1.0 / pi_camera_frequency)
+
+
+def broadcast_minimap_worker():
+    """Send latest minimap frame to all connected clients."""
+    global encoded_frame
+    while True:
+        try:
+            encoded_minimap = minimap_queue.get(timeout=1)
+        except queue.Empty:
+            continue
+
+        if clients:
+            dead_clients = []
+            for ws in clients.copy():
+                try:
                     ws.send(encoded_minimap)
                 except Exception:
                     dead_clients.append(ws)
             for dc in dead_clients:
                 clients.discard(dc)
 
-        time.sleep(1.0 / pi_frequency)
+        time.sleep(1.0 / pi_minimap_frequency)
 
 
 def broadcast_variable_update(name, value):
@@ -196,7 +239,8 @@ if __name__ == "__main__":
     # Kill any previous server still listening on port 5000
     free_port_if_in_use(5000)
 
-    threading.Thread(target=broadcast_worker, daemon=True).start()
+    threading.Thread(target=broadcast_camera_worker, daemon=True).start()
+    threading.Thread(target=broadcast_minimap_worker, daemon=True).start()
     print("Starting WebSocket video server on port 5000...")
 
     app.run(
