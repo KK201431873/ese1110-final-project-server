@@ -16,7 +16,7 @@ minimap_queue = queue.Queue(maxsize=1)
 
 # Pi connection config
 pi_camera_frequency = 10
-pi_minimap_frequency = 30
+pi_minimap_frequency = 20
 pi_stream_password = "pongworks1110"
 
 # Client connection config

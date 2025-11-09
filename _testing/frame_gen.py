@@ -114,7 +114,7 @@ try:
                     cv2.line(minimap, (0, y_px), (mmap_width, y_px), color, 1, cv2.LINE_AA)
 
                 # --- Draw robot in center ---
-                bot_side_length = int(robot_width * mmap_width / mmap_real_width)
+                bot_side_length = int(robot_width * px_per_m)
                 rect = (center, (bot_side_length, bot_side_length), -math.degrees(robot_heading)) 
                 box = cv2.boxPoints(rect)
                 box = np.intp(box)
