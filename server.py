@@ -1,4 +1,4 @@
-from flask import Flask, request, redirect, render_template
+from flask import Flask, request, redirect, render_template, make_response, jsonify
 from flask_sock import Sock
 import threading
 import time
@@ -14,18 +14,24 @@ encoded_frame = None
 frame_queue = queue.Queue(maxsize=1)
 minimap_queue = queue.Queue(maxsize=1)
 
-# Pi connection config
+## Pi connection config
 pi_camera_frequency = 10
 pi_minimap_frequency = 20
 pi_stream_password = "pongworks1110"
 
-# Client connection config
+## Client connection config
 MAX_CLIENTS = 10
+# to register your browser as an admin, visit https://ese.pongworks.dpdns.org/ and enter this into chrome's JS console:
+# localStorage.setItem("admin_token", "1e2d1c30ba116e0661a79fa751ab4f8e87b8a9efbc53004cffad7b33742e4ec2");
+ADMIN_TOKEN = "1e2d1c30ba116e0661a79fa751ab4f8e87b8a9efbc53004cffad7b33742e4ec2"
 
-# Keep a set of connected WebSocket clients
+
+
+## Keep a set of connected WebSocket clients
 clients = set()
+admin_clients = set()
 
-# Dictionary to store received variables
+## Dictionary to store received variables
 variables: dict[str, str] = {}  # name -> value
 
 
@@ -40,14 +46,38 @@ def index():
 @app.route("/watch")
 def watch():
     """Render the watch page with WebSocket video feed"""
-    if len(clients) >= MAX_CLIENTS:
+    admin_cookie = request.cookies.get("admin_token")
+    is_admin = (admin_cookie == ADMIN_TOKEN)
+
+    if len(clients) - len(admin_clients) >= MAX_CLIENTS and not is_admin:
         return redirect("/full")
+
     return render_template("watch_ws.html")
 
 
 @app.route("/full")
 def full_page():
     return render_template("server_full.html")
+
+
+# --- Get admin cookie ---
+@app.post("/set_admin_cookie")
+def set_admin_cookie():
+    data = request.get_json(force=True)
+    token = data.get("token")
+
+    resp = make_response(jsonify({"ok": True}))
+
+    # Only set cookie if matches admin token
+    if token == ADMIN_TOKEN:
+        resp.set_cookie(
+            "admin_token",
+            token,
+            httponly=True,     # JS cannot read the cookie directly
+            samesite="Strict",
+            secure=True        # required for HTTPS
+        )
+    return resp
 
 
 # --- WebSocket route for video feed ---
@@ -114,28 +144,47 @@ def pi_stream(ws):
 @sock.route("/video_feed")
 def video_feed(ws):
     """Keep track of connected clients using a set, up to MAX_CLIENTS."""
-    if len(clients) >= MAX_CLIENTS:
+    # Extract cookies
+    cookies = ws.environ.get("HTTP_COOKIE", "")
+    cookie_dict = dict(item.split("=", 1) for item in cookies.split("; ") if "=" in item)
+
+    is_admin = (cookie_dict.get("admin_token") == ADMIN_TOKEN)
+
+    # Count only normal viewers
+    viewer_count = len(clients) - len(admin_clients)
+
+    # Enforce viewer limit for non-admins
+    if not is_admin and viewer_count >= MAX_CLIENTS:
         try:
             ws.send("SERVER_FULL")
             time.sleep(0.1)
             ws.close()
         except Exception:
             pass
-        print("[!] Connection refused: server full")
+        print("[!] Non-admin refused (server full)")
         return
-    
+
+    # Register client first
     clients.add(ws)
-    print(f"[+] Client connected ({len(clients)} total)")
+
+    # Track admin separately
+    if is_admin:
+        admin_clients.add(ws)
+
+    print(f"[+] Client connected (admins={len(admin_clients)}, viewers={viewer_count}; admin={is_admin})")
+
+    # Keep connection alive
     try:
         while True:
-            data = ws.receive()
-            if data is None:
+            if ws.receive() is None:
                 break
-    except Exception:
+    except:
         pass
     finally:
         clients.discard(ws)
-        print(f"[-] Client disconnected ({len(clients)} total)")
+        admin_clients.discard(ws) 
+
+        print(f"[-] Client disconnected (admins={len(admin_clients)}, viewers={len(clients)-len(admin_clients)})")
 
 
 # --- Broadcast to WebSocket clients ---
@@ -157,6 +206,7 @@ def broadcast_camera_worker():
                     dead_clients.append(ws)
             for dc in dead_clients:
                 clients.discard(dc)
+                admin_clients.discard(dc)
 
         time.sleep(1.0 / pi_camera_frequency)
 
