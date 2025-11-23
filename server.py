@@ -30,6 +30,7 @@ ADMIN_TOKEN = "1e2d1c30ba116e0661a79fa751ab4f8e87b8a9efbc53004cffad7b33742e4ec2"
 ## Keep a set of connected WebSocket clients
 clients = set()
 admin_clients = set()
+pi_clients = set()
 
 ## Dictionary to store received variables
 variables: dict[str, str] = {}  # name -> value
@@ -86,6 +87,14 @@ def pi_stream(ws):
     """Authenticate data sender and continuously receive JPEG frames over WebSocket."""
     print("[*] Pi attempting to connect")
 
+    # Step 0: Remove stale connections
+    for old_ws in list(pi_clients):
+        try:
+            old_ws.close()
+        except:
+            pass
+        pi_clients.discard(old_ws)
+
     # Step 1: Authenticate
     auth_msg = ws.receive()
     if auth_msg != pi_stream_password:
@@ -94,6 +103,8 @@ def pi_stream(ws):
         return
 
     print("[+] Pi authenticated successfully")
+    pi_clients.add(ws)
+
     try:
         while True:
             data = ws.receive()
@@ -137,6 +148,7 @@ def pi_stream(ws):
                 case _:
                     print("[!] Unknown message type received")
     finally:
+        pi_clients.discard(ws)
         print("[*] Pi disconnected")
 
 
@@ -171,7 +183,9 @@ def video_feed(ws):
     if is_admin:
         admin_clients.add(ws)
 
-    print(f"[+] Client connected (admins={len(admin_clients)}, viewers={viewer_count}; admin={is_admin})")
+    viewer_count = len(clients) - len(admin_clients)
+    user_type = "Admin" if is_admin else "Client"
+    print(f"[+] {user_type} connected (admins={len(admin_clients)}, viewers={viewer_count}; admin={is_admin})")
 
     # Keep connection alive
     try:
@@ -184,7 +198,26 @@ def video_feed(ws):
         clients.discard(ws)
         admin_clients.discard(ws) 
 
-        print(f"[-] Client disconnected (admins={len(admin_clients)}, viewers={len(clients)-len(admin_clients)})")
+        print(f"[-] {user_type} disconnected (admins={len(admin_clients)}, viewers={len(clients)-len(admin_clients)})")
+
+
+# --- Admin-only command route -----------------------------------
+@app.post("/command_robot")
+def command_robot():
+    admin_cookie = request.cookies.get("admin_token")
+    if admin_cookie != ADMIN_TOKEN:
+        return jsonify({"ok": False, "message": "Not authorized"}), 403
+
+    # Broadcast command to Pi via WebSockets
+    req_data: dict = request.get_json()
+    if req_data and "command_running" in req_data:
+        running = req_data["command_running"]
+        command: str = "START_ROBOT" if running else "STOP_ROBOT"
+        broadcast_command(command)
+
+        return jsonify({"ok": True, "message": f"{command} command sent"})
+    
+    return jsonify({"ok": False, "message": "Failed to get command request."})
 
 
 # --- Broadcast to WebSocket clients ---
@@ -244,6 +277,20 @@ def broadcast_variable_update(name, value):
             dead_clients.append(ws)
     for dc in dead_clients:
         clients.discard(dc)
+
+
+def broadcast_command(cmd: str):
+    """Send a command string to the Pi via WebSocket."""
+    msg = f"CMD:{cmd}"
+    dead = []
+    for ws in pi_clients.copy():
+        try:
+            ws.send(msg)
+            print(f"[broadcast_command] Sent {cmd} command!")
+        except:
+            dead.append(ws)
+    for d in dead:
+        pi_clients.discard(d)
 
 
 # --- Graceful shutdown handler ---

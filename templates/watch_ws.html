@@ -32,6 +32,39 @@
             font-variant: small-caps;
         }
 
+
+        /* Command button */
+        .flat-btn {
+            padding: 10px 28px;
+            font-size: 1.2rem;
+            border: 2px solid #fff3;
+            background: #fff1;
+            border-radius: 8px;
+            color: white;
+            backdrop-filter: blur(5px);
+            transition: 0.25s;
+        }
+        .flat-btn:hover {
+            background: #fff2;
+        }
+        .flat-btn.start {
+            background: rgba(255,193,7,0.25);
+            border-color: #ffc107;
+            color: #ffc107;
+        }
+        .flat-btn.stop {
+            background: rgba(220,53,69,0.2);
+            border-color: #dc3545;
+            color: #dc3545;
+        }
+        .flat-btn.disconnected {
+            background: rgba(20,20,20,0.2);
+            border-color: #303030;
+            color: #303030;
+        }
+
+        
+        /* Main content */
         .main-container {
             display: flex;
             justify-content: center;
@@ -57,7 +90,7 @@
             background: #1b2130;
             padding: 15px 20px;
             border-radius: 10px;
-            box-shadow: 0 0 10px rgba(255,255,255,0.05);
+            box-shadow: 0 0 10px rgba(0,0,0,0.05);
             overflow-y: auto;
             text-align: left;
         }
@@ -68,7 +101,7 @@
             justify-content: center;
             border-radius: 12px;             /* restore rounded edges */
             overflow: hidden;                /* crop overflowing video corners */
-            box-shadow: 0 0 20px rgba(255,255,255,0.1);
+            box-shadow: 0 0 20px rgba(0,0,0,0.1);
             background: #1b2130;                /* keeps it neat when video not loaded */
         }
 
@@ -87,7 +120,7 @@
             border-radius: 10px;
             padding: 10px;
             text-align: center;
-            box-shadow: 0 0 10px rgba(255,255,255,0.05);
+            box-shadow: 0 0 10px rgba(0,0,0,0.05);
         }
 
         /* Minimap smaller + cropped */
@@ -141,11 +174,41 @@
                 max-width: none;
             }
         }
+
+        /* Handling "PongWorks Dashboard" banner on mobile */
+        @media (max-width: 600px) {
+            .header-banner {
+                padding: 5px 0;
+            }
+
+            .header-banner h1 img {
+                height: 40px;      /* smaller logo */
+            }
+
+            .header-banner h1 {
+                font-size: 1.4rem; /* smaller title text */
+            }
+
+            body {
+                padding-top: 60px; /* reduce reserved space */
+            }
+        }
     </style>
 </head>
 <body>
-    <div class="header-banner">
+    <!-- <div class="header-banner">
         <h1><img src="/static/favicon.png" height="60px"> PongWorks Dashboard</h1>
+    </div> -->
+    <div class="header-banner d-flex justify-content-between align-items-center px-4">
+        <h1 class="m-0">
+            <img src="/static/favicon.png" height="60px">
+            <div id="banner" style="display: inline-block;">PongWorks Dashboard</div>
+        </h1>
+
+        <!-- Admin-only button (hidden by default) -->
+        <button id="command-btn" class="flat-btn disconnected" style="display:none;">
+            Disconnected...
+        </button>
     </div>
 
     <div class="main-container">
@@ -215,6 +278,10 @@
             if (typeof event.data === 'string') {
                 if (event.data.startsWith('VAR_UPDATE:')) {
                     const [, name, value] = event.data.split(':');
+                    if (name === "running") {
+                        robotRunning = (value === "True");
+                        updateCommandButton();
+                    }
                     vars[name] = value;
                     updateVarList();
                 }
@@ -275,6 +342,58 @@
             console.log("Disconnected, retrying soon...");
             setTimeout(() => location.reload(), 1000);
         };
+
+        // --- Admin Start/Stop Button -----------------------------------
+        const commandBtn = document.getElementById("command-btn");
+        const banner = document.getElementById("banner");
+        let robotRunning = false;
+
+        function updateCommandButton() {
+            if (!commandBtn.style.display || commandBtn.style.display === "none") return;
+
+            commandBtn.classList.remove("disconnected");
+            if (robotRunning) {
+                commandBtn.textContent = "Stop Robot";
+                commandBtn.classList.remove("start");
+                commandBtn.classList.add("stop");
+            } else {
+                commandBtn.textContent = "Start Robot";
+                commandBtn.classList.remove("stop");
+                commandBtn.classList.add("start");
+            }
+        }
+
+
+        // Only show button if this browser is admin
+        if (adminToken === "1e2d1c30ba116e0661a79fa751ab4f8e87b8a9efbc53004cffad7b33742e4ec2") {
+            commandBtn.style.display = "inline-block";
+            banner.textContent = "PongWorks Dashboard - Admin";
+        }
+
+        // Send command to Flask, then Pi
+        commandBtn.onclick = async () => {
+            if (commandBtn.textContent!=="Start Robot" && commandBtn.textContent!=="Stop Robot") {
+                alert("Can't send command! Robot is disconnected.");
+                return;
+            }
+            commandBtn.disabled = true;
+
+            const endpoint = "/command_robot";
+            let command_running = !robotRunning;
+
+            try {
+                await fetch(endpoint, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({command_running})
+                });
+            } catch (err) {
+                alert("Failed to send command.");
+            }
+
+            commandBtn.disabled = false;
+        };
+
     </script>
 </body>
 </html>
